@@ -31,4 +31,8 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'cerp' => [
+        'url' => env('EXTERNAL_API_URL', 'http://116.0.52.51:8077/api/cerp'),
+    ],
+
 ];

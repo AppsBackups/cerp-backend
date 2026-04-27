@@ -32,8 +32,12 @@ class ExcelUploadController extends Controller
             'updated_at' => now(),
         ], $request->records);
 
-        // 🚀 bulk insert (fast)
-        DB::table('locations')->insert($records);
+        // 🚀 bulk upsert (fast and prevents duplicates)
+        DB::table('locations')->upsert(
+            $records,
+            ['pin'], // unique identifier for upsert
+            ['lat', 'lng', 'updated_at'] // columns to update
+        );
 
         return response()->json([
             'error' => false,

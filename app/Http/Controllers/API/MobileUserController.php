@@ -52,7 +52,8 @@ class MobileUserController extends Controller
     // Login
     public function login(Request $request)
 {
-    $user = MobileUser::where('username', $request->email)->first();
+    $loginField = filter_var($request->email, FILTER_VALIDATE_EMAIL) ? 'email' : 'username';
+    $user = MobileUser::where($loginField, $request->email)->first();
 
     if (! $user || ! Hash::check($request->password, $user->password)) {
         return response()->json(['error' => 'Invalid credentials'], 401);
@@ -78,14 +79,20 @@ class MobileUserController extends Controller
         return response()->json($request->user());
     }
 
-                // Get all mobile users
-    public function getAllUsers()
+    // Get all mobile users with pagination
+    public function getAllUsers(Request $request)
     {
-        $users = \App\Models\MobileUser::all();
+        $perPage = $request->get('per_page', 20);
+        $users = \App\Models\MobileUser::orderBy('id', 'desc')->paginate($perPage);
+        
         return response()->json([
-        'users' => $users
-    ]);
-}
+            'users' => $users->items(),
+            'current_page' => $users->currentPage(),
+            'last_page' => $users->lastPage(),
+            'total' => $users->total(),
+            'per_page' => $users->perPage()
+        ]);
+    }
 
 // public function noUsers()
 // {
@@ -93,7 +100,7 @@ class MobileUserController extends Controller
 // }
 public function noUsers()
 {
-    return \App\Models\MobileUser::where('status','!=', 'active')->count();
+    return \App\Models\MobileUser::where('status', false)->count();
 }
 
 

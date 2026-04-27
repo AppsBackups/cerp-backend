@@ -69,6 +69,6 @@ class AuthController extends Controller
                 'token' => $token
             ], 200);
         }
-        return response()->json(['error' => 'Credentails do not match our record'], 500);
+        return response()->json(['error' => 'Credentials do not match our record'], 401);
     }
 }

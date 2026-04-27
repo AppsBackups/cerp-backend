@@ -9,6 +9,7 @@ use App\Models\PropertyRecord;
 use App\Models\UserCirclePin;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class UserCircleController extends Controller
 {
@@ -18,7 +19,11 @@ class UserCircleController extends Controller
         $user = MobileUser::where('username', $username)->first();
         if (!$user) return response()->json(['error' => 'User not found'], 404);
 
-        $circles = PropertyRecord::distinct()->pluck('circle');
+        // Optimized: Cache the circles list for 60 minutes as it doesn't change frequently
+        $circles = \Illuminate\Support\Facades\Cache::remember('distinct_circles', 3600, function () {
+            return PropertyRecord::distinct()->pluck('circle');
+        });
+        
         return response()->json(['circles' => $circles]);
     }
 
@@ -44,6 +49,83 @@ class UserCircleController extends Controller
 
         // Return the circles as a response
         return response()->json(['circles' => $circles]);
+    }
+
+    /**
+     * Get circles for multiple users with pagination support
+     */
+    public function getCirclesForAllUsers(Request $request)
+    {
+        try {
+            // Validate request
+            $request->validate([
+                'usernames' => 'nullable|array',
+                'usernames.*' => 'string',
+                'page' => 'nullable|integer',
+                'per_page' => 'nullable|integer'
+            ]);
+            
+            $perPage = $request->get('per_page', 20);
+            
+            // Get paginated users first
+            $userQuery = MobileUser::orderBy('id', 'desc');
+            
+            if ($request->has('usernames') && !empty($request->usernames)) {
+                $userQuery->whereIn('username', $request->usernames);
+            }
+            
+            $paginatedUsers = $userQuery->paginate($perPage);
+            $usernames = $paginatedUsers->pluck('username')->toArray();
+            $userIdToUsername = $paginatedUsers->pluck('username', 'id')->toArray();
+            
+            if (empty($userIdToUsername)) {
+                return response()->json([
+                    'data' => [],
+                    'current_page' => $paginatedUsers->currentPage(),
+                    'last_page' => $paginatedUsers->lastPage(),
+                    'total' => $paginatedUsers->total()
+                ]);
+            }
+            
+            // Get all circle assignments for these users in a SINGLE query
+            $userIds = array_keys($userIdToUsername);
+            $assignments = DB::table('user_circle_pins')
+                ->whereIn('user_id', $userIds)
+                ->select('user_id', 'circle')
+                ->distinct()
+                ->get()
+                ->groupBy('user_id')
+                ->map(function ($items) {
+                    return $items->pluck('circle')->toArray();
+                });
+            
+            // Prepare response with usernames as keys
+            $result = [];
+            foreach ($usernames as $username) {
+                // Find user_id for this username
+                $userId = array_search($username, $userIdToUsername);
+                if ($userId && isset($assignments[$userId])) {
+                    $result[$username] = $assignments[$userId];
+                } else {
+                    $result[$username] = [];
+                }
+            }
+            
+            return response()->json([
+                'data' => $result,
+                'current_page' => $paginatedUsers->currentPage(),
+                'last_page' => $paginatedUsers->lastPage(),
+                'total' => $paginatedUsers->total(),
+                'per_page' => $paginatedUsers->perPage()
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Batch circles error: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Failed to fetch circles',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
 
@@ -187,22 +269,37 @@ public function getPinsByCircle2(Request $request)
 
         $records = PropertyRecord::where('circle', $request->circle)->get();
 
+        $dataToInsert = [];
+        $now = now();
+
         foreach ($records as $record) {
-            UserCirclePin::updateOrCreate(
-                [
-                    'user_id' => $user->id,
-                    'pin' => $record->pin
-                ],
-                [
-                    'circle' => $record->circle,
-                    'ratingarea' => $record->ratingarea,
-                    'Locality' => $record->Locality,
-                    'Block' => $record->Block,
-                    'Street_Address' => $record->Street_Address,
-                    'OwnerName' => $record->OwnerName,
-                    'Road' => $record->Road,
-                    'status' => false // default value for new/updated records
-                ]
+            $dataToInsert[] = [
+                'user_id' => $user->id,
+                'pin' => $record->pin,
+                'circle' => $record->circle,
+                'ratingarea' => $record->ratingarea,
+                'Locality' => $record->Locality,
+                'Block' => $record->Block,
+                'Street_Address' => $record->Street_Address,
+                'OwnerName' => $record->OwnerName,
+                'Road' => $record->Road,
+                'status' => false,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        // Use chunked inserts to handle large datasets efficiently
+        $chunks = array_chunk($dataToInsert, 500);
+        foreach ($chunks as $chunk) {
+            // Using upsert or updateOrCreate in bulk is complex in Eloquent for this structure,
+            // but since we want to "updateOrCreate", we can use DB::table()->upsert if supported
+            // or just insert ignore if that's the intent. 
+            // Given the original code used updateOrCreate on (user_id, pin), we'll use upsert.
+            DB::table('user_circle_pins')->upsert(
+                $chunk, 
+                ['user_id', 'pin'], 
+                ['circle', 'ratingarea', 'Locality', 'Block', 'Street_Address', 'OwnerName', 'Road', 'status', 'updated_at']
             );
         }
 
@@ -230,9 +327,11 @@ public function getPinsByCircle2(Request $request)
     // Step 2: Fetch all records for the new circle
     $records = PropertyRecord::where('circle', $request->circle)->get();
 
-    // Step 3: Insert all new pins for this circle
+    // Step 3: Insert all new pins for this circle in bulk
+    $dataToInsert = [];
+    $now = now();
     foreach ($records as $record) {
-        UserCirclePin::create([
+        $dataToInsert[] = [
             'user_id' => $user->id,
             'pin' => $record->pin,
             'circle' => $record->circle,
@@ -242,8 +341,16 @@ public function getPinsByCircle2(Request $request)
             'Street_Address' => $record->Street_Address,
             'OwnerName' => $record->OwnerName,
             'Road' => $record->Road,
-            'status' => false, // default
-        ]);
+            'status' => false,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+    }
+
+    // Use chunked inserts to handle large datasets
+    $chunks = array_chunk($dataToInsert, 500);
+    foreach ($chunks as $chunk) {
+        DB::table('user_circle_pins')->insert($chunk);
     }
 
     return response()->json(['message' => 'Circle pins replaced successfully']);
@@ -517,17 +624,6 @@ public function transferPins(Request $request)
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
 public function bulkChangePinStatus(Request $request)
 {
     $validated = $request->validate([
@@ -561,19 +657,6 @@ public function bulkChangePinStatus(Request $request)
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 public function getnum()
 {
     return PropertyRecord::count();
@@ -581,4 +664,3 @@ public function getnum()
 
 
 }
-

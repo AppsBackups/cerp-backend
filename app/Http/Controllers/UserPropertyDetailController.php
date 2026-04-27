@@ -101,7 +101,7 @@ public function stores(Request $request)
         // Send JSON to external API
         $response = Http::timeout(60)
             ->withHeaders(['Content-Type' => 'application/json'])
-            ->post('http://116.0.52.51:8077/api/cerp', $payload);
+            ->post(config('services.cerp.url'), $payload);
 
         // Handle response
         if ($response->successful()) {
@@ -880,8 +880,10 @@ public function deleteReportsByUsername(Request $request)
 
 public function report(Request $request) 
 {
-    $query = UserPropertyDetail::with('user')
-        ->whereNotIn('username', ['farhan001', 'kabir002']);
+    // Optimized: Only load necessary columns from user relationship
+    $query = UserPropertyDetail::with(['user' => function($q) {
+        $q->select('id', 'name', 'username', 'phonenumber');
+    }])->whereNotIn('username', ['farhan001', 'kabir002']);
     
     // Apply filters
     $query = $this->applyFilters($query, $request);
@@ -921,8 +923,18 @@ public function report(Request $request)
 // Method to get all properties without pagination (for filter options)
 public function reportFilterOptions()
 {
-    $propertyDetails = UserPropertyDetail::with('user')
+    // Optimized: Only load necessary columns from user relationship and main table
+    // This reduces memory usage and query time significantly
+    $propertyDetails = UserPropertyDetail::with(['user' => function($q) {
+            $q->select('id', 'name', 'username', 'phonenumber');
+        }])
         ->whereNotIn('username', ['farhan001', 'kabir002'])
+        ->select([
+            'id', 'user_id', 'username', 'circle', 'pin', 'info', 'latitude', 'longitude', 
+            'floors_num', 'basement', 'land_area', 'covered_area', 'land', 
+            'other', 'comments', 'picture_path', 'picture2_path', 
+            'capture_time', 'submission_time', 'resubmission', 'Store_front'
+        ])
         ->get();
     
     if ($propertyDetails->isEmpty()) {
@@ -939,8 +951,10 @@ public function reportFilterOptions()
 // Method to export filtered data (all results without pagination)
 public function reportExport(Request $request)
 {
-    $query = UserPropertyDetail::with('user')
-        ->whereNotIn('username', ['farhan001', 'kabir002']);
+    // Optimized: Only load necessary columns from user relationship
+    $query = UserPropertyDetail::with(['user' => function($q) {
+        $q->select('id', 'name', 'username', 'phonenumber');
+    }])->whereNotIn('username', ['farhan001', 'kabir002']);
     
     // Apply filters
     $query = $this->applyFilters($query, $request);

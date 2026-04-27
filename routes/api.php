@@ -13,6 +13,7 @@ use App\Http\Controllers\ExcelUploadController;
 
 Route::post('login', [AuthController::class, 'login']);
 Route::post('register', [AuthController::class, 'create']);
+Route::any('/circles-for-all-users', [UserCircleController::class, 'getCirclesForAllUsers']);
 Route::middleware('auth')->post('logout', [AuthController::class, 'logout']);
 Route::middleware('auth')->get('current-user', [AuthController::class, 'getCurrentUser']);
 
