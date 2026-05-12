@@ -923,29 +923,40 @@ public function report(Request $request)
 // Method to get all properties without pagination (for filter options)
 public function reportFilterOptions()
 {
-    // Optimized: Only load necessary columns from user relationship and main table
-    // This reduces memory usage and query time significantly
-    $propertyDetails = UserPropertyDetail::with(['user' => function($q) {
-            $q->select('id', 'name', 'username', 'phonenumber');
-        }])
+    $landOptions = UserPropertyDetail::whereNotNull('land')->distinct()->pluck('land')->sort()->values();
+    
+    $nameOptions = \App\Models\MobileUser::whereHas('propertyDetails')
         ->whereNotIn('username', ['farhan001', 'kabir002'])
-        ->select([
-            'id', 'user_id', 'username', 'circle', 'pin', 'info', 'latitude', 'longitude', 
-            'floors_num', 'basement', 'land_area', 'covered_area', 'land', 
-            'other', 'comments', 'picture_path', 'picture2_path', 
-            'capture_time', 'submission_time', 'resubmission', 'Store_front'
-        ])
-        ->get();
+        ->distinct()
+        ->pluck('name')
+        ->sort()
+        ->values();
+        
+    $pinOptions = UserPropertyDetail::whereNotNull('pin')->distinct()->pluck('pin')->sort()->values();
+    $circleOptions = UserPropertyDetail::whereNotNull('circle')->distinct()->pluck('circle')->sort()->values();
+    $floorsOptions = UserPropertyDetail::whereNotNull('floors_num')->distinct()->pluck('floors_num')->sort()->values();
+    $resubmissionOptions = UserPropertyDetail::distinct()->pluck('resubmission')->sort()->values();
     
-    if ($propertyDetails->isEmpty()) {
-        return response()->json(['data' => []], 200);
-    }
-    
-    $reportData = $propertyDetails->map(function ($detail) {
-        return $this->formatPropertyData($detail);
-    });
-    
-    return response()->json(['data' => $reportData], 200);
+    $usernames = UserPropertyDetail::whereNotIn('username', ['farhan001', 'kabir002'])
+         ->distinct()
+         ->pluck('username')
+         ->sort()
+         ->values();
+ 
+     $maxLandArea = UserPropertyDetail::max('land_area') ?: 0;
+     $maxCoveredArea = UserPropertyDetail::max('covered_area') ?: 0;
+ 
+     return response()->json([
+         'land' => $landOptions,
+         'name' => $nameOptions,
+         'pin' => $pinOptions,
+         'circle' => $circleOptions,
+         'floors' => $floorsOptions,
+         'resubmission' => $resubmissionOptions,
+         'usernames' => $usernames,
+         'max_land_area' => $maxLandArea,
+         'max_covered_area' => $maxCoveredArea
+     ], 200);
 }
 
 // Method to export filtered data (all results without pagination)

@@ -7,6 +7,7 @@ use App\Models\MobileUser;
 use Illuminate\Http\Request;
 use App\Models\PropertyRecord;
 use App\Models\UserCirclePin;
+use App\Models\UserPropertyDetail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -166,11 +167,20 @@ public function getPinsByCircle(Request $request)
         return response()->json(['error' => 'User not found'], 404);
     }
 
+    $usedPins = DB::table('user_property_details')
+        ->where('username', '!=', $request->username)
+        ->select('pin')
+        ->distinct();
+
     $pins = DB::table('user_circle_pins as ucp')
         ->leftJoin('locations as l', 'l.pin', '=', 'ucp.pin')
+        ->leftJoinSub($usedPins, 'used', function ($join) {
+            $join->on('used.pin', '=', 'ucp.pin');
+        })
         ->where('ucp.user_id', $user->id)
         ->where('ucp.circle', $request->circle)
         ->where('ucp.status', 0)
+        ->whereNull('used.pin')
         ->select(
             'ucp.id',
             'ucp.pin',
@@ -211,11 +221,20 @@ public function getPinsByCircle2(Request $request)
         return response()->json(['error' => 'User not found'], 404);
     }
 
+    $usedPins = DB::table('user_property_details')
+        ->where('username', '!=', $request->username)
+        ->select('pin')
+        ->distinct();
+
     $query = DB::table('user_circle_pins as ucp')
         ->leftJoin('locations as l', 'l.pin', '=', 'ucp.pin')
+        ->leftJoinSub($usedPins, 'used', function ($join) {
+            $join->on('used.pin', '=', 'ucp.pin');
+        })
         ->where('ucp.user_id', $user->id)
         ->where('ucp.circle', $request->circle)
-        ->where('ucp.status', 0);
+        ->where('ucp.status', 0)
+        ->whereNull('used.pin');
 
     // Typeahead search: only apply if 4+ characters typed
     if ($request->filled('search') && strlen($request->search) >= 4) {
@@ -268,6 +287,10 @@ public function getPinsByCircle2(Request $request)
         }
 
         $records = PropertyRecord::where('circle', $request->circle)->get();
+        $usedPinSet = UserPropertyDetail::where('circle', $request->circle)
+            ->distinct()
+            ->pluck('pin')
+            ->flip();
 
         $dataToInsert = [];
         $now = now();
@@ -283,7 +306,7 @@ public function getPinsByCircle2(Request $request)
                 'Street_Address' => $record->Street_Address,
                 'OwnerName' => $record->OwnerName,
                 'Road' => $record->Road,
-                'status' => false,
+                'status' => $usedPinSet->has($record->pin),
                 'created_at' => $now,
                 'updated_at' => $now,
             ];
@@ -299,7 +322,7 @@ public function getPinsByCircle2(Request $request)
             DB::table('user_circle_pins')->upsert(
                 $chunk, 
                 ['user_id', 'pin'], 
-                ['circle', 'ratingarea', 'Locality', 'Block', 'Street_Address', 'OwnerName', 'Road', 'status', 'updated_at']
+                ['circle', 'ratingarea', 'Locality', 'Block', 'Street_Address', 'OwnerName', 'Road', 'updated_at']
             );
         }
 
@@ -326,6 +349,10 @@ public function getPinsByCircle2(Request $request)
 
     // Step 2: Fetch all records for the new circle
     $records = PropertyRecord::where('circle', $request->circle)->get();
+    $usedPinSet = UserPropertyDetail::where('circle', $request->circle)
+        ->distinct()
+        ->pluck('pin')
+        ->flip();
 
     // Step 3: Insert all new pins for this circle in bulk
     $dataToInsert = [];
@@ -341,7 +368,7 @@ public function getPinsByCircle2(Request $request)
             'Street_Address' => $record->Street_Address,
             'OwnerName' => $record->OwnerName,
             'Road' => $record->Road,
-            'status' => false,
+            'status' => $usedPinSet->has($record->pin),
             'created_at' => $now,
             'updated_at' => $now,
         ];
@@ -350,7 +377,11 @@ public function getPinsByCircle2(Request $request)
     // Use chunked inserts to handle large datasets
     $chunks = array_chunk($dataToInsert, 500);
     foreach ($chunks as $chunk) {
-        DB::table('user_circle_pins')->insert($chunk);
+        DB::table('user_circle_pins')->upsert(
+            $chunk,
+            ['user_id', 'pin'],
+            ['circle', 'ratingarea', 'Locality', 'Block', 'Street_Address', 'OwnerName', 'Road', 'updated_at']
+        );
     }
 
     return response()->json(['message' => 'Circle pins replaced successfully']);
@@ -428,6 +459,10 @@ public function addpin(Request $request) {
     }
 
     try {
+        $isUsed = UserPropertyDetail::where('pin', $request->pin)
+            ->where('username', '!=', $request->username)
+            ->exists();
+
         $pin = UserCirclePin::create([
             'user_id' => $user->id,
             'circle' => $request->circle,
@@ -438,7 +473,7 @@ public function addpin(Request $request) {
             'Street_Address' => $request->Street_Address,
             'OwnerName' => $request->OwnerName,
             'Road' => $request->Road,
-            'status' => $request->status,
+            'status' => $isUsed ? 1 : $request->status,
         ]);
 
         return response()->json([
