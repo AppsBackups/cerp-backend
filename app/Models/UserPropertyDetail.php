@@ -30,6 +30,7 @@ class UserPropertyDetail extends Model
         'resubmission',
         'Store_front',
         'picture2_path',
+        'multi_unit',
     ];
 
    

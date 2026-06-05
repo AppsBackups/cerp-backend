@@ -448,6 +448,7 @@ public function store(Request $request)
             'capture_time'    => 'nullable|string',
             'submission_time' => 'required|string',
             'Store_front'     => 'nullable|integer',
+            'multi_unit'      => 'nullable|integer',
         ]);
 
         $validated['capture_time'] = $validated['capture_time'] ?? now()->toDateTimeString();
@@ -518,6 +519,7 @@ public function store(Request $request)
                 'submission_time'=> $validated['submission_time'],
                 'resubmission'   => 1,
                 'Store_front'    => $validated['Store_front'] ?? 0,
+                'multi_unit'     => $validated['multi_unit'] ?? 0,
             ]);
 
             if ($picturePath) {
@@ -552,6 +554,7 @@ public function store(Request $request)
                 'submission_time'=> $validated['submission_time'],
                 'resubmission'   => 0,
                 'Store_front'    => $validated['Store_front'] ?? 0,
+                'multi_unit'     => $validated['multi_unit'] ?? 0,
             ]);
 
             $message = 'Property detail submitted successfully';
@@ -936,6 +939,7 @@ public function reportFilterOptions()
     $circleOptions = UserPropertyDetail::whereNotNull('circle')->distinct()->pluck('circle')->sort()->values();
     $floorsOptions = UserPropertyDetail::whereNotNull('floors_num')->distinct()->pluck('floors_num')->sort()->values();
     $resubmissionOptions = UserPropertyDetail::distinct()->pluck('resubmission')->sort()->values();
+    $multiUnitOptions = UserPropertyDetail::distinct()->pluck('multi_unit')->sort()->values();
     
     $usernames = UserPropertyDetail::whereNotIn('username', ['farhan001', 'kabir002'])
          ->distinct()
@@ -945,7 +949,7 @@ public function reportFilterOptions()
  
      $maxLandArea = UserPropertyDetail::max('land_area') ?: 0;
      $maxCoveredArea = UserPropertyDetail::max('covered_area') ?: 0;
- 
+
      return response()->json([
          'land' => $landOptions,
          'name' => $nameOptions,
@@ -953,6 +957,7 @@ public function reportFilterOptions()
          'circle' => $circleOptions,
          'floors' => $floorsOptions,
          'resubmission' => $resubmissionOptions,
+         'multi_unit' => $multiUnitOptions,
          'usernames' => $usernames,
          'max_land_area' => $maxLandArea,
          'max_covered_area' => $maxCoveredArea
@@ -1088,6 +1093,24 @@ private function applyFilters($query, Request $request)
         });
     }
     
+    // Multi-unit filter
+    if ($request->has('multi_unit') && !empty($request->get('multi_unit'))) {
+        $multiUnitValues = explode(',', $request->get('multi_unit'));
+        $multiUnitConditions = [];
+        
+        foreach ($multiUnitValues as $value) {
+            if ($value === 'Yes') {
+                $multiUnitConditions[] = 1;
+            } elseif ($value === 'No') {
+                $multiUnitConditions[] = 0;
+            }
+        }
+        
+        if (!empty($multiUnitConditions)) {
+            $query->whereIn('multi_unit', $multiUnitConditions);
+        }
+    }
+    
     return $query;
 }
 
@@ -1119,6 +1142,7 @@ private function formatPropertyData($detail)
         'user_phone' => $detail->user->phonenumber ?? null,
         'resubmission' => $detail->resubmission ?? 0,
         'Store_front' => $detail->Store_front ?? 0,
+        'multi_unit' => $detail->multi_unit ?? 0,
     ];
 }
 
